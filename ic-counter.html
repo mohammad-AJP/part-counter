@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Part Counter</title>
+<style>
+  :root{
+    --paper:#F7F6F1;
+    --ink:#16181D;
+    --ink-soft:#5A5F6B;
+    --line:#D9D6CC;
+    --blue:#0A5BFF;
+    --blue-soft:#E4ECFF;
+    --signal:#00C2A8;
+    --warn:#FF7A3D;
+    --mono:ui-monospace,"SF Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans)}
+  body{min-height:100dvh;display:flex;flex-direction:column;padding:18px 16px 28px;max-width:640px;margin:0 auto}
+
+  header{display:flex;align-items:baseline;justify-content:space-between;border-bottom:1.5px solid var(--ink);padding-bottom:10px}
+  header h1{font-size:15px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;margin:0}
+  header .sub{font-family:var(--mono);font-size:11px;color:var(--ink-soft);letter-spacing:.04em}
+
+  /* Readout */
+  .readout{margin:20px 0 6px;display:flex;align-items:flex-end;gap:14px}
+  .count{font-family:var(--mono);font-weight:700;font-size:88px;line-height:.82;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .count.empty{color:var(--line)}
+  .readout .label{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-soft);padding-bottom:10px}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--ink-soft);min-height:16px;letter-spacing:.02em}
+  .meta b{color:var(--blue);font-weight:700}
+  .meta .warnpill{color:var(--warn)}
+
+  /* Stage */
+  .stage{margin-top:14px;border:1.5px solid var(--line);border-radius:4px;background:#fff;overflow:hidden;position:relative;min-height:160px;display:flex;align-items:center;justify-content:center}
+  .stage canvas{display:block;width:100%;height:auto}
+  .stage .placeholder{color:var(--ink-soft);font-family:var(--mono);font-size:12px;letter-spacing:.04em;text-align:center;padding:48px 20px;line-height:1.7}
+  .corner{position:absolute;width:14px;height:14px;border-color:var(--blue);pointer-events:none}
+  .corner.tl{top:6px;left:6px;border-left:2px solid;border-top:2px solid}
+  .corner.tr{top:6px;right:6px;border-right:2px solid;border-top:2px solid}
+  .corner.bl{bottom:6px;left:6px;border-left:2px solid;border-bottom:2px solid}
+  .corner.br{bottom:6px;right:6px;border-right:2px solid;border-bottom:2px solid}
+
+  /* Controls */
+  .actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  button.act{appearance:none;border:1.5px solid var(--ink);background:var(--ink);color:#fff;font-family:var(--sans);font-weight:600;font-size:15px;padding:15px 12px;border-radius:4px;cursor:pointer;letter-spacing:.01em}
+  button.act.ghost{background:#fff;color:var(--ink)}
+  button.act:active{transform:translateY(1px)}
+  input[type=file]{display:none}
+
+  .tune{margin-top:18px;border-top:1px solid var(--line);padding-top:14px;opacity:.45;pointer-events:none;transition:opacity .2s}
+  .tune.live{opacity:1;pointer-events:auto}
+  .tune .row{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+  .tune .row label{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft);width:88px;flex:none}
+  .tune input[type=range]{flex:1;accent-color:var(--blue);height:22px}
+  .tune .val{font-family:var(--mono);font-size:12px;color:var(--ink);width:42px;text-align:right;font-variant-numeric:tabular-nums}
+  .toggle{display:flex;gap:8px;align-items:center;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft)}
+
+  footer{margin-top:auto;padding-top:18px;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);line-height:1.7;letter-spacing:.02em}
+  footer b{color:var(--ink)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Part&nbsp;Counter</h1>
+    <span class="sub" id="dims">— no image —</span>
+  </header>
+
+  <div class="readout">
+    <div class="count empty" id="count">0</div>
+    <div class="label">parts<br>detected</div>
+  </div>
+  <div class="meta" id="meta">Photograph the sheet straight-on, parts not overlapping.</div>
+
+  <div class="stage" id="stage">
+    <span class="corner tl"></span><span class="corner tr"></span>
+    <span class="corner bl"></span><span class="corner br"></span>
+    <div class="placeholder" id="ph">Take a photo of your parts<br>laid out on the white sheet.</div>
+    <canvas id="cv" style="display:none"></canvas>
+  </div>
+
+  <div class="actions">
+    <button class="act" id="btnShoot">Take photo</button>
+    <button class="act ghost" id="btnPick">Choose image</button>
+  </div>
+  <input type="file" id="fileShoot" accept="image/*" capture="environment">
+  <input type="file" id="filePick" accept="image/*">
+
+  <div class="tune" id="tune">
+    <div class="row">
+      <label>Threshold</label>
+      <input type="range" id="sThresh" min="-70" max="70" value="0">
+      <span class="val" id="vThresh">0</span>
+    </div>
+    <div class="row">
+      <label>Min size</label>
+      <input type="range" id="sMin" min="2" max="80" value="22">
+      <span class="val" id="vMin">22%</span>
+    </div>
+    <div class="row" style="margin-bottom:4px">
+      <span class="toggle"><input type="checkbox" id="cMask"> show mask</span>
+    </div>
+  </div>
+
+  <footer>
+    Runs fully on-device — nothing is uploaded. Method: grayscale → <b>Otsu</b> threshold →
+    8-connected component labeling → area-based splitting of touching parts.
+    If a touching cluster is split correctly it's shown in <b>orange</b> with its sub-count.
+    Tune the sliders if the count looks off.
+  </footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('cv'), ctx=cv.getContext('2d',{willReadFrequently:true});
+let G=null, W=0, H=0;          // cached grayscale + dims of processed image
+let baseImg=null;              // ImageData of downscaled source (for redraw)
+const MAXDIM=1400;
+
+/* ---------- load ---------- */
+function loadFile(file){
+  if(!file) return;
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{
+    const s=Math.min(1, MAXDIM/Math.max(img.width,img.height));
+    W=Math.round(img.width*s); H=Math.round(img.height*s);
+    cv.width=W; cv.height=H;
+    ctx.drawImage(img,0,0,W,H);
+    baseImg=ctx.getImageData(0,0,W,H);
+    // grayscale
+    G=new Uint8ClampedArray(W*H);
+    const d=baseImg.data;
+    for(let i=0,p=0;i<d.length;i+=4,p++){
+      G[p]=(d[i]*0.299+d[i+1]*0.587+d[i+2]*0.114)|0;
+    }
+    $('ph').style.display='none';
+    cv.style.display='block';
+    $('dims').textContent=W+'×'+H+' px';
+    $('tune').classList.add('live');
+    URL.revokeObjectURL(url);
+    run();
+  };
+  img.onerror=()=>{ $('meta').innerHTML='<span class="warnpill">Could not read that image. Try again.</span>'; };
+  img.src=url;
+}
+
+/* ---------- Otsu threshold ---------- */
+function otsu(g){
+  const hist=new Array(256).fill(0);
+  for(let i=0;i<g.length;i++) hist[g[i]]++;
+  const total=g.length;
+  let sum=0; for(let t=0;t<256;t++) sum+=t*hist[t];
+  let sumB=0,wB=0,maxVar=-1,thr=127;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(wB===0) continue;
+    const wF=total-wB; if(wF===0) break;
+    sumB+=t*hist[t];
+    const mB=sumB/wB, mF=(sum-sumB)/wF;
+    const v=wB*wF*(mB-mF)*(mB-mF);
+    if(v>maxVar){maxVar=v;thr=t;}
+  }
+  return thr;
+}
+
+/* ---------- connected components (8-conn flood fill) ---------- */
+function components(mask){
+  const labels=new Int32Array(W*H).fill(0);
+  const comps=[]; const stack=new Int32Array(W*H); 
+  let lbl=0;
+  for(let i=0;i<W*H;i++){
+    if(mask[i] && labels[i]===0){
+      lbl++; let sp=0; stack[sp++]=i; labels[i]=lbl;
+      let area=0, sx=0, sy=0, minx=W,maxx=0,miny=H,maxy=0;
+      while(sp>0){
+        const p=stack[--sp];
+        const x=p%W, y=(p/W)|0;
+        area++; sx+=x; sy+=y;
+        if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y;
+        for(let dy=-1;dy<=1;dy++){
+          const ny=y+dy; if(ny<0||ny>=H) continue;
+          for(let dx=-1;dx<=1;dx++){
+            const nx=x+dx; if(nx<0||nx>=W) continue;
+            const np=ny*W+nx;
+            if(mask[np] && labels[np]===0){ labels[np]=lbl; stack[sp++]=np; }
+          }
+        }
+      }
+      comps.push({area,cx:sx/area,cy:sy/area,minx,maxx,miny,maxy});
+    }
+  }
+  return comps;
+}
+
+const median=arr=>{
+  if(!arr.length) return 0;
+  const a=[...arr].sort((p,q)=>p-q);
+  const m=a.length>>1;
+  return a.length%2?a[m]:(a[m-1]+a[m])/2;
+};
+
+/* ---------- main pipeline ---------- */
+function run(){
+  if(!G) return;
+  const off=+$('sThresh').value;
+  const minPct=+$('sMin').value/100;
+  const thr=Math.max(1,Math.min(254, otsu(G)+off));
+
+  // object = darker than threshold (dark parts on white paper)
+  const mask=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++) mask[i]= G[i]<thr ? 1:0;
+
+  let comps=components(mask);
+  if(comps.length===0){ draw([],0,mask); setReadout(0,0,0,thr); return; }
+
+  // estimate the area of a single part, robust to touching clusters
+  let areas=comps.map(c=>c.area).sort((a,b)=>a-b);
+  let med=median(areas);
+  const singles=areas.filter(a=>a>=0.55*med && a<=1.6*med);
+  const single=singles.length? median(singles): med;
+
+  const noiseFloor=Math.max(8, minPct*single);
+
+  let total=0; const kept=[];
+  for(const c of comps){
+    if(c.area<noiseFloor) continue;          // drop specks / dust
+    const n=Math.max(1, Math.round(c.area/single));
+    c.n=n; total+=n; kept.push(c);
+  }
+  const clusters=kept.filter(c=>c.n>1).length;
+  draw(kept,single,mask);
+  setReadout(total,kept.length,clusters,thr);
+}
+
+function setReadout(total,blobs,clusters,thr){
+  const c=$('count'); c.textContent=total; c.classList.toggle('empty',total===0);
+  if(total===0){ $('meta').textContent='No parts found — lower Min size or adjust Threshold.'; return; }
+  let m=`<b>${total}</b> parts · ${blobs} blobs`;
+  if(clusters>0) m+=` · <span class="warnpill">${clusters} touching cluster${clusters>1?'s':''} split</span>`;
+  $('meta').innerHTML=m;
+}
+
+/* ---------- overlay ---------- */
+function draw(comps,single,mask){
+  if($('cMask').checked){
+    const out=ctx.createImageData(W,H);
+    for(let i=0;i<W*H;i++){ const v=mask[i]?20:245; const o=i*4; out.data[o]=out.data[o+1]=out.data[o+2]=v; out.data[o+3]=255; }
+    ctx.putImageData(out,0,0);
+  }else{
+    ctx.putImageData(baseImg,0,0);
+  }
+  const lw=Math.max(2, W/400);
+  ctx.lineWidth=lw; ctx.font=`700 ${Math.max(13,W/45)}px ${getComputedStyle(document.body).getPropertyValue('--mono')}`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(const c of comps){
+    const single=c.n>1;
+    ctx.strokeStyle=single?'#FF7A3D':'#0A5BFF';
+    ctx.fillStyle  =single?'rgba(255,122,61,0.18)':'rgba(10,91,255,0.16)';
+    const x=c.minx-lw, y=c.miny-lw, w=c.maxx-c.minx+2*lw, h=c.maxy-c.miny+2*lw;
+    ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+    if(single){
+      ctx.fillStyle='#FF7A3D';
+      const r=Math.max(11,W/40);
+      ctx.beginPath(); ctx.arc(c.cx,c.cy,r,0,7); ctx.fill();
+      ctx.fillStyle='#fff'; ctx.fillText(c.n,c.cx,c.cy+1);
+    }
+  }
+}
+
+/* ---------- wire up ---------- */
+$('btnShoot').onclick=()=>$('fileShoot').click();
+$('btnPick').onclick =()=>$('filePick').click();
+$('fileShoot').onchange=e=>loadFile(e.target.files[0]);
+$('filePick').onchange =e=>loadFile(e.target.files[0]);
+
+$('sThresh').oninput=e=>{$('vThresh').textContent=(e.target.value>0?'+':'')+e.target.value; run();};
+$('sMin').oninput   =e=>{$('vMin').textContent=e.target.value+'%'; run();};
+$('cMask').onchange =run;
+</script>
+</body>
+</html>
